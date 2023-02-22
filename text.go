@@ -734,6 +734,7 @@ func (t *Text) Type(r rune) {
 		q0, q1    int
 		nnb, n, i int
 		nr        int
+		rr        rune
 	)
 	// Avoid growing column and row tags.
 	if t.what != Body && t.what != Tag && r == '\n' {
@@ -778,6 +779,23 @@ func (t *Text) Type(r rune) {
 		}
 	}
 
+	ignoreSpaceAndIndent := func(q int) int {
+		for q < t.Nc() {
+			rr = t.ReadC(q)
+			if rr == 0 {
+				break
+			}
+
+			if rr == '\t' || rr == ' ' {
+				q++
+			} else {
+				break
+			}
+		}
+
+		return q
+	}
+
 	// This switch block contains all actions that don't mutate the buffer
 	// and hence there is no need to create an Undo record.
 	switch r {
@@ -810,8 +828,22 @@ func (t *Text) Type(r rune) {
 			Tagdown()
 			return
 		}
-		n = t.fr.GetFrameFillStatus().Maxlines / 3
-		caseDown()
+
+		n = t.FindH(t.q1, true)
+		i = t.FindH(t.q1, false)
+		q1 = t.q1 + n
+
+		if q1 >= t.Nc() {
+			return
+		}
+
+		q1 += util.Min(t.FindH(q1-1, false), i) + 1
+
+		if i > 0 {
+			q1 = ignoreSpaceAndIndent(q1)
+		}
+
+		t.Show(q1, q1, true)
 		return
 	case Kscrollonedown:
 		if t.what == Tag {
@@ -833,8 +865,20 @@ func (t *Text) Type(r rune) {
 			Tagup()
 			return
 		}
-		n = t.fr.GetFrameFillStatus().Maxlines / 3
-		caseUp()
+
+		n = t.FindH(t.q0, false)
+		q0 = t.q0 - n
+
+		if q0 > 0 {
+			i = t.FindH(q0-1, false)
+			q0 += -i + util.Min(i, n) - 1
+		}
+
+		if n > 0 {
+			q0 = ignoreSpaceAndIndent(q0)
+		}
+
+		t.Show(q0, q0, true)
 		return
 	case Kscrolloneup:
 		if t.what == Tag {
@@ -850,25 +894,27 @@ func (t *Text) Type(r rune) {
 		return
 	case draw.KeyHome:
 		t.TypeCommit()
-		if t.org > t.iq1 {
-			q0 = t.BackNL(t.iq1, 1)
-			t.SetOrigin(q0, true)
-		} else {
-			t.Show(0, 0, false)
+		q0 = t.q0 - t.FindH(t.q0, false)
+
+		for q0 < t.Nc() {
+			rr = t.ReadC(q0)
+			if rr == 0 {
+				break
+			}
+
+			if rr == '\t' || rr == ' ' {
+				q0++
+			} else {
+				break
+			}
 		}
+
+		t.Show(q0, q0, true)
 		return
 	case draw.KeyEnd:
 		t.TypeCommit()
-		if t.iq1 > t.org+t.fr.GetFrameFillStatus().Nchars {
-			if t.iq1 > t.file.Nr() {
-				// should not happen, but does. and it will crash textbacknl.
-				t.iq1 = t.file.Nr()
-			}
-			q0 = t.BackNL(t.iq1, 1)
-			t.SetOrigin(q0, true)
-		} else {
-			t.Show(t.file.Nr(), t.file.Nr(), false)
-		}
+		q1 = t.q1 + t.FindH(t.q1, true)
+		t.Show(q1, q1, true)
 		return
 	case '\t': // ^I (TAB)
 		if t.tabexpand {
@@ -1556,6 +1602,37 @@ func (t *Text) BackNL(p, n int) int {
 		}
 	}
 	return p
+}
+
+func (t *Text) FindH(p int, e bool) int {
+	var o, d int
+
+	d = p
+	o = -1
+	if e {
+		o = 1
+	}
+	if !e {
+		p += o
+	}
+
+	for p < t.Nc() && p > 0 {
+		if t.ReadC(p) == '\n' {
+			break
+		}
+		p += o
+	}
+
+	if e {
+		d = p - d
+	} else {
+		d -= p
+		if d > 0 {
+			d--
+		}
+	}
+
+	return d
 }
 
 func (t *Text) SetOrigin(org int, exact bool) {
